@@ -1,4 +1,4 @@
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 const User = require("../models/userModel");
 const RefreshToken = require("../models/refreshTokenModel");
 const {
@@ -30,11 +30,18 @@ exports.login = async (req, res) => {
     await RefreshToken.save(user.id, refreshToken);
 
     res.cookie("access_token", accessToken, {
-        httpOnly: true, sameSite: "lax", maxAge: 15 * 60 * 1000,
+        httpOnly: true,
+        sameSite: "none",
+        maxAge: 15 * 60 * 1000,
+        secure: true
     });
 
     res.cookie("refresh_token", refreshToken, {
-        httpOnly: true, sameSite: "strict", path: "/api/private/auth", maxAge: 7 * 24 * 60 * 60 * 1000,
+        httpOnly: true,
+        sameSite: "none",
+        path: "/api/private/auth",
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+        secure: true,
     });
 
     return res.json({
@@ -63,7 +70,10 @@ exports.refresh = async (req, res) => {
         });
 
         res.cookie("access_token", newAccess, {
-            httpOnly: true, sameSite: "lax", maxAge: 15 * 60 * 1000,
+            httpOnly: true,
+            sameSite: "none",
+            maxAge: 15 * 60 * 1000,
+            secure: true,
         });
 
         return res.json({
@@ -83,9 +93,19 @@ exports.logout = async (req, res) => {
         await RefreshToken.delete(refreshToken);
     }
 
-    res.clearCookie("access_token");
-    res.clearCookie("refresh_token", {
-        path: "/api/private/auth"
+    res.cookie("access_token", "", {
+        httpOnly: true,
+        sameSite: "none",
+        maxAge: 0,
+        secure: true
+    });
+
+    res.cookie("refresh_token", "", {
+        httpOnly: true,
+        sameSite: "none",
+        path: "/api/private/auth",
+        maxAge: 0,
+        secure: true,
     });
 
     return res.json({success: true, message: "Logged out"});

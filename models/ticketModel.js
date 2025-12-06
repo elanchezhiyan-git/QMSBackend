@@ -2,17 +2,18 @@ const pool = require('../db');
 
 const Ticket = {
     async create(customer_id, counter_id) {
-        const [r] = await pool.query(
+        const result = await pool.query(
             `INSERT INTO tickets
                  (customer_id, counter_id, status, enabled, removed, created_at)
-             VALUES (?, ?, 'pending', 1, 0, NOW())`,
+             VALUES ($1, $2, 'pending', 1, 0, NOW())
+             RETURNING id`,
             [customer_id, counter_id]
         );
-        return r.insertId;
+        return result.rows[0].id;
     },
 
     async read(id) {
-        const [rows] = await pool.query(
+        const result = await pool.query(
             `SELECT t.*,
                     c.name  AS counter_name,
                     u.name  AS customer_name,
@@ -20,25 +21,25 @@ const Ticket = {
              FROM tickets t
                       LEFT JOIN counters c ON c.id = t.counter_id
                       LEFT JOIN users u ON u.id = t.customer_id
-             WHERE t.id = ?`,
+             WHERE t.id = $1`,
             [id]
         );
-        return rows[0];
+        return result.rows[0];
     },
 
     async readByAgent(id) {
-        const [rows] = await pool.query(
+        const result = await pool.query(
             `SELECT t.*
              FROM tickets t
-             WHERE t.agent_id = ?
+             WHERE t.agent_id = $1
                AND t.status = 'called'`,
             [id]
         );
-        return rows[0];
+        return result.rows[0];
     },
 
     async list(limit, offset) {
-        const [rows] = await pool.query(
+        const result = await pool.query(
             `SELECT t.*,
                     c.name  AS counter_name,
                     u.name  AS customer_name,
@@ -47,96 +48,95 @@ const Ticket = {
                       LEFT JOIN counters c ON c.id = t.counter_id
                       LEFT JOIN users u ON u.id = t.customer_id
              WHERE t.removed = 0
-             ORDER BY t.created_at DESC LIMIT ?
-             OFFSET ?`,
+             ORDER BY t.created_at DESC LIMIT $1
+             OFFSET $2`,
             [limit, offset]
         );
-        return rows;
+        return result.rows;
     },
 
     async totalCount() {
-        const [[row]] = await pool.query(
+        const result = await pool.query(
             `SELECT COUNT(*) AS count
              FROM tickets
              WHERE removed = 0`
         );
-        return row.count;
+        return result.rows[0].count;
     },
 
     async listByPhone(phone) {
-        const [rows] = await pool.query(`
+        const result = await pool.query(`
             SELECT *
             FROM tickets t
                      LEFT JOIN users u ON u.id = t.customer_id
-            where u.phone = '${phone}'
+            where u.phone = $1
             ORDER BY t.created_at DESC
-        `);
-        return rows;
+        `, [phone]);
+        return result.rows;
     },
 
     async callNext(counterId, agentId) {
-        const conn = await pool.getConnection();
+        const conn = await pool.connect();
 
         try {
-            await conn.beginTransaction();
+            await conn.query('BEGIN');
 
-            const [rows] = await conn.query(
+            const result = await conn.query(
                 `SELECT *
                  FROM tickets
-                 WHERE counter_id = ?
+                 WHERE counter_id = $1
                    AND status = 'pending'
                    AND removed = 0
                  ORDER BY created_at ASC LIMIT 1
-         FOR
-                UPDATE`,
+                 FOR UPDATE`,
                 [counterId]
             );
 
-            if (!rows.length) {
-                await conn.rollback();
+            if (!result.rows.length) {
+                await conn.query('ROLLBACK');
                 conn.release();
                 return null;
             }
 
-            const ticket = rows[0];
+            const ticket = result.rows[0];
 
             await conn.query(
                 `UPDATE tickets
                  SET status = 'called',
                      called_at = NOW(),
-                     agent_id = ?
-                 WHERE id = ?`,
+                     agent_id = $1
+                 WHERE id = $2`,
                 [agentId, ticket.id]
             );
 
-            await conn.commit();
+            await conn.query('COMMIT');
             conn.release();
 
             return ticket;
         } catch (err) {
-            await conn.rollback();
+            await conn.query('ROLLBACK');
             conn.release();
             throw err;
         }
     },
 
     async finish(ticketId, agentId) {
-        const [r] = await pool.query(
+        const result = await pool.query(
             `UPDATE tickets
              SET status      = 'finished',
                  finished_at = NOW(),
-                 agent_id    = ?
-             WHERE id = ?`,
+                 agent_id    = $1
+             WHERE id = $2`,
             [agentId, ticketId]
         );
-        return r.affectedRows > 0;
+        return result.rowCount > 0;
     },
 
     async softDelete(id) {
         await pool.query(
             `UPDATE tickets
              SET removed = 1
-             WHERE id = ?`,
+             WHERE id = $1`,
             [id]
         );
         return true;

@@ -1,91 +1,101 @@
 // seed.js
 const pool = require("./db");
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 
 async function seed() {
     try {
         console.log("⏳ Creating tables...");
 
         await pool.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        name VARCHAR(100),
-        email VARCHAR(150) UNIQUE,
-        phone VARCHAR(50),
-        password VARCHAR(255),
-        role VARCHAR(30) DEFAULT 'customer',
-        enabled TINYINT DEFAULT 1,
-        removed TINYINT DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
+            CREATE TABLE IF NOT EXISTS users (
+                                                 id SERIAL PRIMARY KEY,
+                                                 name VARCHAR(100),
+                email VARCHAR(150) UNIQUE,
+                phone VARCHAR(50),
+                password VARCHAR(255),
+                role VARCHAR(30) DEFAULT 'customer',
+                enabled SMALLINT DEFAULT 1,
+                removed SMALLINT DEFAULT 0,
+                created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                )
+        `);
 
         await pool.query(`
-      CREATE TABLE IF NOT EXISTS refresh_tokens (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        admin_id INT,
-        token TEXT,
-        expires_at DATETIME,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
+            CREATE TABLE IF NOT EXISTS refresh_tokens (
+                                                          id SERIAL PRIMARY KEY,
+                                                          admin_id INT,
+                                                          token TEXT,
+                                                          expires_at TIMESTAMP WITHOUT TIME ZONE,
+                                                          created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
 
         await pool.query(`
-      CREATE TABLE IF NOT EXISTS counters (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        name VARCHAR(150),
-        enabled TINYINT DEFAULT 1,
-        removed TINYINT DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
+            CREATE TABLE IF NOT EXISTS counters (
+                                                    id SERIAL PRIMARY KEY,
+                                                    name VARCHAR(150),
+                enabled SMALLINT DEFAULT 1,
+                removed SMALLINT DEFAULT 0,
+                created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                )
+        `);
 
         await pool.query(`
+      DO $$ BEGIN
+          CREATE TYPE ticket_status AS ENUM('pending','called','finished');
+      EXCEPTION
+          WHEN duplicate_object THEN NULL;
+      END $$;
+      
       CREATE TABLE IF NOT EXISTS tickets (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         customer_id INT,
         counter_id INT,
         agent_id INT,
-        status ENUM('pending','called','finished') DEFAULT 'pending',
-        enabled TINYINT DEFAULT 1,
-        removed TINYINT DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        called_at DATETIME,
-        finished_at DATETIME
+        status ticket_status DEFAULT 'pending',
+        enabled SMALLINT DEFAULT 1,
+        removed SMALLINT DEFAULT 0,
+        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        called_at TIMESTAMP WITHOUT TIME ZONE,
+        finished_at TIMESTAMP WITHOUT TIME ZONE
       )
     `);
 
         await pool.query(`
-      CREATE TABLE IF NOT EXISTS agent_counter_sessions (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT,
-        counter_id INT,
-        active TINYINT DEFAULT 1,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
+            CREATE TABLE IF NOT EXISTS agent_counter_sessions (
+                                                                  id SERIAL PRIMARY KEY,
+                                                                  user_id INT,
+                                                                  counter_id INT,
+                                                                  active SMALLINT DEFAULT 1,
+                                                                  created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
 
         console.log("✔ Tables created");
 
         console.log("⏳ Seeding counters...");
+        // ON CONFLICT DO NOTHING replaces MySQL's INSERT IGNORE
         await pool.query(`
-      INSERT IGNORE INTO counters (id, name)
-      VALUES (1, 'General'), (2, 'Billing'), (3, 'VIP')
-    `);
+            INSERT INTO counters (id, name)
+            VALUES (1, 'General'), (2, 'Billing'), (3, 'VIP')
+                ON CONFLICT (id) DO NOTHING
+        `);
         console.log("✔ Counters seeded");
 
         console.log("⏳ Creating admin...");
-        const [admin] = await pool.query(
-            "SELECT id FROM users WHERE email = ?",
+
+        // Use $1 for parameter binding in pool.query for PostgreSQL
+        const result = await pool.query(
+            "SELECT id FROM users WHERE email = $1",
             ["admin@gmail.com"]
         );
 
-        if (!admin.length) {
+        if (!result.rows.length) {
             const hashed = await bcrypt.hash("12345678", 10);
 
             await pool.query(
                 `INSERT INTO users (name, email, password, role, created_at)
-         VALUES (?, ?, ?, ?, NOW())`,
+                 VALUES ($1, $2, $3, $4, NOW())`,
                 ["Admin", "admin@gmail.com", hashed, "admin"]
             );
 

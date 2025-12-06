@@ -2,49 +2,50 @@ const pool = require('../db');
 
 const Counter = {
     async create(name) {
-        const [row] = await pool.query(
+        const result = await pool.query(
             `INSERT INTO counters (name, enabled, removed, created_at)
-             VALUES (?, 1, 0, NOW())`,
+             VALUES ($1, 1, 0, NOW())
+             RETURNING id`,
             [name]
         );
-        return row.insertId;
+        return result.rows[0].id;
     },
 
     async list() {
-        const [rows] = await pool.query(
+        const result = await pool.query(
             `SELECT id, name, enabled
              FROM counters
              ORDER BY id ASC`
         );
-        return rows;
+        return result.rows;
     },
 
     async listActive() {
-        const [rows] = await pool.query(
+        const result = await pool.query(
             `SELECT id, name, enabled
              FROM counters
              where enabled = 1
              ORDER BY id ASC`
         );
-        return rows;
+        return result.rows;
     },
 
     async read(id) {
-        const [rows] = await pool.query(
+        const result = await pool.query(
             `SELECT id, name, enabled
              FROM counters
-             WHERE id = ?
+             WHERE id = $1
                AND removed = 0`,
             [id]
         );
-        return rows[0];
+        return result.rows[0];
     },
 
     async update(id, name) {
         await pool.query(
             `UPDATE counters
-             SET name = ?
-             WHERE id = ?`,
+             SET name = $1
+             WHERE id = $2`,
             [name, id]
         );
         return this.read(id);
@@ -53,8 +54,8 @@ const Counter = {
     async updateActiveStatus(id, isActive) {
         await pool.query(
             `UPDATE counters
-             SET enabled = ?
-             WHERE id = ?`,
+             SET enabled = $1
+             WHERE id = $2`,
             [isActive, id]
         );
         return this.read(id);
@@ -64,7 +65,7 @@ const Counter = {
         await pool.query(
             `DELETE
              from counters
-             WHERE id = ?`,
+             WHERE id = $1`,
             [id]
         );
         return true;
